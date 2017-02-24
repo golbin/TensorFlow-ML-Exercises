@@ -29,7 +29,7 @@ outputs = tf.reshape(outputs, [batch_size, sequence_length, dic_size])
 y_data = tf.reshape(y_data, [batch_size, sequence_length])
 weights = tf.ones([batch_size, sequence_length])
 
-    sequence_loss = tf.contrib.seq2seq.sequence_loss(outputs, y_data, weights)
+sequence_loss = tf.contrib.seq2seq.sequence_loss(outputs, y_data, weights)
 mean_loss = tf.reduce_mean(sequence_loss) / batch_size
 train_op = tf.train.AdamOptimizer(learning_rate=0.1).minimize(mean_loss)
 
