@@ -1,73 +1,47 @@
 import tensorflow as tf
+from tensorflow.contrib import rnn
 
-
-char_arr = ['h', 'e', 'l', 'o']
-# {'o': 3, 'l': 2, 'e': 1, 'h': 0}
-char_dic = {w: i for i, w in enumerate(char_arr)}
-
-# [0, 1, 2, 2, 3]
-ground_truth = [char_dic[c] for c in 'hello']
-
-# [[1,0,0,0],  # h
-#  [0,1,0,0],  # e
-#  [0,0,1,0],  # l
-#  [0,0,1,0]], # l
-x_data = tf.one_hot(ground_truth[:-1], len(char_dic), 1.0, 0.0, -1)
+sample = " if you want you"
+char_set = list(set(sample))  # id -> char
+char_dic = {w: i for i, w in enumerate(char_set)}
 
 # settings
-rnn_size = len(char_dic) # 4
-batch_size = 1
-output_size = 4
-cell_depth = 1
+rnn_hidden_size = dic_size = len(char_dic)  # output size of each cell
+batch_size = 1  # one sample data,one batch
+input_len = len(sample) - 1  # number of lstm rollings (unit #)
 
-# RNN Model
-rnn_cell_single = tf.nn.rnn_cell.BasicRNNCell(
-                    num_units=rnn_size,
-                    input_size=None)
+sample_idx = [char_dic[c] for c in sample]  # char to index
+x_data = tf.one_hot(sample_idx[:-1], dic_size)  # one hot
+y_data = sample_idx[1:]
 
-if cell_depth > 1:
-    rnn_cell = tf.nn.rnn_cell.MultiRNNCell([rnn_cell_single] * cell_depth)
-    # [[1, 4], [1, 4]]
-    # state = [tf.zeros([batch_size, rnn_cell_single.state_size])
-    #             for i in xrange(cell_depth)]
-else:
-    rnn_cell = rnn_cell_single
-    # [1, 4]
-    # state = tf.zeros([batch_size, rnn_cell_single.state_size])
+# Make lstm with rnn_hidden_size (each unit input vector size)
+lstm = rnn.BasicLSTMCell(rnn_hidden_size, state_is_tuple=True)
+lstm = rnn.MultiRNNCell([lstm] * 1, state_is_tuple=True)
 
-# magic!
-state = rnn_cell.zero_state(batch_size, tf.float32)
+# split to input (char)length. This will decide unrolling size
+x_split = tf.split(value=x_data, num_or_size_splits=[input_len])
 
-# [[1,0,0,0]] # h
-# [[0,1,0,0]] # e
-# [[0,0,1,0]] # l
-# [[0,0,1,0]] # l
-x_split = tf.split(0, len(char_dic), x_data)
+# outputs: unrolling size x hidden size, state = hidden size
+outputs, _states = rnn.static_rnn(lstm, x_split, dtype=tf.float32)
 
-# outputs 4 x Tensor(1, 4)
-# state = Tensor(1, 4)
-outputs, state = tf.nn.rnn(
-                    cell=rnn_cell,
-                    inputs=x_split,
-                    initial_state=state)
+# (optional) softmax layer
+softmax_w = tf.get_variable("softmax_w", [input_len, dic_size])
+softmax_b = tf.get_variable("softmax_b", [dic_size])
+outputs = outputs * softmax_w + softmax_b
 
-# reshape outputs = 4 x [1, 4] -> [1, 16] -> [4, 4]
-logits = tf.reshape(tf.concat(1, outputs), [-1, rnn_size])
+outputs = tf.reshape(outputs, [-1, dic_size])
+y_data = tf.reshape(y_data, [-1])
+weights = tf.ones([input_len * batch_size])
 
-# [1 2 2 3]
-targets = tf.reshape(ground_truth[1:], [-1])
-
-# [1. 1. 1. 1]
-weights = tf.ones([len(char_dic) * batch_size])
-
-loss = tf.nn.seq2seq.sequence_loss_by_example([logits], [targets], [weights])
-cost = tf.reduce_sum(loss) / batch_size
-train_op = tf.train.RMSPropOptimizer(0.01, 0.9).minimize(cost)
+loss = tf.contrib.legacy_seq2seq.sequence_loss_by_example(
+    [outputs], [y_data], [weights])
+cost = tf.reduce_mean(loss) / batch_size
+train_op = tf.train.AdamOptimizer(learning_rate=0.1).minimize(cost)
 
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
 
-for i in range(50):
-    sess.run(train_op)
-    result = sess.run(tf.argmax(logits, 1))
-    print result, [char_arr[t] for t in result]
+for i in range(1000):
+    _, l = sess.run([train_op, cost])
+    result = sess.run(tf.argmax(outputs, 1))
+    print(''.join([char_set[t] for t in result]), l)
